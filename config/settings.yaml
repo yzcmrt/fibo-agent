@@ -75,12 +75,13 @@ volume:
 
 confluence:
   weights:
-    fib_proximity: 0.28
-    sr_overlap: 0.18
-    trendline: 0.16
-    volume_oi: 0.14
-    regime: 0.14
+    fib_proximity: 0.24
+    sr_overlap: 0.15
+    trendline: 0.13
+    volume_oi: 0.12
+    regime: 0.11
     indicator_model: 0.10
+    htf_alignment: 0.15
   signal_threshold: 70
 
 learning:

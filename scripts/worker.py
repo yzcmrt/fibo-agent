@@ -77,12 +77,32 @@ def cycle_once(min_candles: int = 2200) -> None:
         if not orch.hub.has_symbol(exchange, symbol):
             notes.append(f"skip {symbol}")
             continue
+        frames = {}
+        for tf in TFS + ["1w"]:
+            if tf == "1w":
+                need = 260
+            elif tf == "4h":
+                need = min_candles
+            else:
+                need = max(800, min_candles // 6)
+            try:
+                frames[tf] = orch.ingest_symbol(exchange, symbol, tf, need)
+            except Exception as exc:  # noqa: BLE001
+                notes.append(f"{symbol} {tf} {exc}")
+                frames[tf] = None
         for tf in TFS:
-            need = min_candles if tf == "4h" else max(800, min_candles // 6)
-            df = orch.ingest_symbol(exchange, symbol, tf, need)
-            if df.empty:
+            df = frames.get(tf)
+            if df is None or getattr(df, "empty", True):
                 continue
             drawn += persist_drawings(orch, symbol, tf, df)
+            if tf == "4h":
+                analysis = orch.analyze(
+                    df,
+                    daily=frames.get("1d"),
+                    weekly=frames.get("1w"),
+                    symbol=symbol,
+                )
+                notes.append(f"{symbol} htf={analysis.get('htf_bias'):.2f}")
             if tf == "4h" and symbol == "ETH/USDT:USDT":
                 mined = mine_hold_correlations(df, origin_mode="wick")
                 LearningMemory(orch.store).log_phase("mine", json.dumps(mined["rules"]))

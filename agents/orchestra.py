@@ -8,6 +8,7 @@ from analysis.indicators import add_indicators, snapshot_features
 from analysis.macro_regime import classify_regime
 from analysis.pivots import detect_pivots
 from analysis.support_resistance import cluster_sr
+from analysis.trend_confirmation import combine_htf_bias
 from analysis.trendlines import detect_trendlines
 from analysis.volume_profile import volume_profile
 from data.dominance import DominanceClient
@@ -54,15 +55,27 @@ class AgentOrchestra:
         logger.info("ingested %s %s %s rows=%s", exchange, symbol, timeframe, len(df))
         return df
 
-    def analyze(self, df, params: dict[str, Any] | None = None, regime: dict[str, Any] | None = None) -> dict[str, Any]:
+    def analyze(
+        self,
+        df,
+        params: dict[str, Any] | None = None,
+        regime: dict[str, Any] | None = None,
+        daily=None,
+        weekly=None,
+        symbol: str | None = None,
+    ) -> dict[str, Any]:
         params = params or default_genome(self.settings)
         work = add_indicators(df)
         pivots = detect_pivots(work, method=params["method"], threshold=float(params["threshold"]))
         grids = grids_from_pivots(pivots, last_n_legs=6)
+        if symbol and "BTC" in symbol.upper():
+            for grid in grids:
+                grid.extensions = {}
         zones = cluster_sr(pivots, cluster_pct=self.settings["support_resistance"]["cluster_pct"])
         lines = detect_trendlines(pivots)
         profile = volume_profile(work, lookback=self.settings["volume"]["lookback"])
         regime = regime or classify_regime(None, None)
+        htf_bias = combine_htf_bias(daily, weekly)
         last_i = len(work) - 1
         price = float(work["close"].iloc[-1])
         atr = float(work["atr14"].iloc[-1] or price * 0.01)
@@ -79,6 +92,7 @@ class AgentOrchestra:
                 atr=atr,
                 weights=self.settings["confluence"]["weights"],
                 bar_index=last_i,
+                htf_bias=htf_bias,
             )
             feats = snapshot_features(work, last_i)
             feats["atr_pct"] = atr / max(price, 1e-9)
@@ -104,6 +118,7 @@ class AgentOrchestra:
             "regime": regime,
             "scored": scored,
             "params": params,
+            "htf_bias": htf_bias,
         }
 
     def train(self, df) -> dict[str, Any]:

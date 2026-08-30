@@ -6,6 +6,7 @@ from analysis.volume_profile import volume_profile
 from analysis.indicators import add_indicators
 from analysis.macro_regime import classify_regime
 from analysis.calibrate import calibrate_all, load_references
+from analysis.trend_confirmation import combine_htf_bias, timeframe_bias
 
 __all__ = [
     "Pivot",
@@ -20,4 +21,6 @@ __all__ = [
     "classify_regime",
     "calibrate_all",
     "load_references",
+    "combine_htf_bias",
+    "timeframe_bias",
 ]

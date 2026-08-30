@@ -23,6 +23,7 @@ def score_setup(
     atr: float,
     weights: dict[str, float],
     bar_index: int,
+    htf_bias: float = 0.0,
 ) -> dict[str, Any]:
     key = {0.382, 0.5, 0.618, 0.786}
     ratio, lvl, dist = grid.nearest_retracement(price)
@@ -63,6 +64,9 @@ def score_setup(
 
     model_score = 50.0 if model_prob is None else _clamp(model_prob * 100.0)
 
+    signed = htf_bias if grid.direction == "up" else -float(htf_bias)
+    htf_score = _clamp(50.0 + 50.0 * signed)
+
     parts = {
         "fib_proximity": fib_score,
         "sr_overlap": sr_score,
@@ -70,6 +74,7 @@ def score_setup(
         "volume_oi": vol_score,
         "regime": regime_score,
         "indicator_model": model_score,
+        "htf_alignment": htf_score,
     }
     total = 0.0
     wsum = 0.0
@@ -78,6 +83,10 @@ def score_setup(
         total += w * v
         wsum += w
     score = _clamp(total / max(wsum, 1e-9))
+    conflict = signed <= -0.25
+    if conflict:
+        score = min(score, 60.0)
+        score = _clamp(score - 18.0)
     return {
         "score": score,
         "parts": parts,
@@ -85,4 +94,6 @@ def score_setup(
         "nearest_price": lvl,
         "distance": dist,
         "direction": grid.direction,
+        "htf_bias": float(htf_bias),
+        "htf_conflict": conflict,
     }
