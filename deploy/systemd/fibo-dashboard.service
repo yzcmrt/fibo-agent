@@ -1,0 +1,15 @@
+[Unit]
+Description=Crypto Fibo Agent - dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/crypto-fibo-agent
+ExecStart=%h/crypto-fibo-agent/.venv/bin/python dashboard/app.py
+EnvironmentFile=%h/crypto-fibo-agent/.env
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,103 @@
+project:
+  name: crypto-fibo-agent
+  version: 0.1.0
+
+exchanges:
+  primary: okx
+  secondary: bybit
+  enabled:
+    - okx
+    - bybit
+  timeout_ms: 20000
+  rate_limit: true
+
+symbols:
+  perps:
+    - BTC/USDT:USDT
+    - ETH/USDT:USDT
+    - SOL/USDT:USDT
+    - SUI/USDT:USDT
+    - HYPE/USDT:USDT
+  dominance:
+    - USDT.D
+    - USDC.D
+    - BTC.D
+
+timeframes:
+  internal:
+    - 5m
+    - 15m
+  execution:
+    - 1h
+    - 4h
+  structure:
+    - 1d
+  primary: 4h
+  confirmation:
+    - 1d
+    - 1w
+
+history:
+  min_candles_4h: 4380   # ~2 years
+  fetch_limit: 300
+
+database:
+  url: sqlite:///data/fibo_agent.db
+
+pivots:
+  methods:
+    - pct
+    - atr
+  short_pct: 0.03
+  long_pct: 0.08
+  short_atr_mult: 1.5
+  long_atr_mult: 3.0
+  atr_period: 14
+  max_pivots: 40
+
+fibonacci:
+  retracements: [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
+  extensions: [1.272, 1.618, 2.0, 2.618, 3.618, 4.236]
+  key_levels: [0.382, 0.5, 0.618]
+  touch_tolerance_atr: 0.25
+
+trendlines:
+  min_touches: 2
+  lookback_pivots: 12
+
+support_resistance:
+  cluster_pct: 0.006
+  min_touches: 3
+
+volume:
+  va_pct: 0.70
+  lookback: 120
+
+confluence:
+  weights:
+    fib_proximity: 0.28
+    sr_overlap: 0.18
+    trendline: 0.16
+    volume_oi: 0.14
+    regime: 0.14
+    indicator_model: 0.10
+  signal_threshold: 70
+
+learning:
+  target_precision: 0.80
+  min_labeled_setups: 80
+  horizon_bars: 24          # 4h * 24 = 4 days
+  min_continuation_r: 1.0
+  population: 12
+  generations: 6
+  elite_frac: 0.34
+  walk_forward_folds: 4
+  random_seed: 42
+
+alerts:
+  enabled: false
+  render_charts: true
+
+execution:
+  enabled: false
+  paper_only: true

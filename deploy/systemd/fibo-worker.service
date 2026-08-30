@@ -1,0 +1,15 @@
+[Unit]
+Description=Crypto Fibo Agent - worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/crypto-fibo-agent
+ExecStart=%h/crypto-fibo-agent/.venv/bin/python scripts/worker.py --loop
+EnvironmentFile=%h/crypto-fibo-agent/.env
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
