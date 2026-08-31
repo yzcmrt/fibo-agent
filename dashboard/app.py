@@ -61,6 +61,11 @@ class Handler(BaseHTTPRequestHandler):
             reports = store.query("SELECT * FROM reports ORDER BY created_ts DESC LIMIT 20")
             genomes = store.query("SELECT * FROM genomes ORDER BY fitness DESC LIMIT 5")
             corr = store.query("SELECT * FROM correlations ORDER BY ABS(weight) DESC LIMIT 12")
+            fills = store.query("SELECT * FROM paper_fills ORDER BY created_ts DESC LIMIT 20")
+            from dashboard.series import fills_by_venue
+            from execution.kill_switch import is_killed
+            from learning.forward import forward_stats
+            fill_rows = fills.to_dict(orient="records") if not fills.empty else []
             self._json(
                 {
                     "drawings": drawings.to_dict(orient="records") if not drawings.empty else [],
@@ -68,11 +73,38 @@ class Handler(BaseHTTPRequestHandler):
                     "reports": reports.to_dict(orient="records") if not reports.empty else [],
                     "genomes": genomes.to_dict(orient="records") if not genomes.empty else [],
                     "correlations": corr.to_dict(orient="records") if not corr.empty else [],
+                    "paper_fills": fill_rows,
+                    "fills_by_venue": fills_by_venue(fill_rows),
+                    "forward": forward_stats(store),
+                    "killed": is_killed(store),
                 }
             )
             return
         if path == "/api/health":
             self._json({"ok": True})
+            return
+        if path == "/api/ohlcv":
+            q = parse_qs(parsed.query)
+            settings = load_settings()
+            store = get_store()
+            exchange = (q.get("exchange") or [settings["exchanges"]["primary"]])[0]
+            symbol = (q.get("symbol") or [settings["symbols"]["perps"][0]])[0]
+            tf = (q.get("tf") or ["4h"])[0]
+            from dashboard.series import candles_payload
+
+            df = store.load_ohlcv(exchange, symbol, tf)
+            self._json({"symbol": symbol, "tf": tf, "candles": candles_payload(df)})
+            return
+        if path == "/api/cvd":
+            q = parse_qs(parsed.query)
+            settings = load_settings()
+            store = get_store()
+            exchange = (q.get("exchange") or [settings["exchanges"]["primary"]])[0]
+            symbol = (q.get("symbol") or [settings["symbols"]["perps"][0]])[0]
+            from dashboard.series import spark_payload
+
+            df = store.load_cvd(exchange, symbol, "swap", "4h")
+            self._json({"symbol": symbol, "spark": spark_payload(df)})
             return
         self._json({"error": "not_found"}, 404)
 
@@ -103,6 +135,13 @@ class Handler(BaseHTTPRequestHandler):
                     {"s": str(body.get("label") or "skip"), "id": int(body["drawing_id"])},
                 )
             self._json({"ok": True})
+            return
+        if parsed.path == "/api/kill":
+            from execution.kill_switch import set_enabled
+            store = get_store()
+            enabled = bool(body.get("enabled", False))
+            set_enabled(store, enabled)
+            self._json({"ok": True, "enabled": enabled})
             return
         self._json({"error": "not_found"}, 404)
 

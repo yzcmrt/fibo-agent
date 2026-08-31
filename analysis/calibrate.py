@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from analysis.fibonacci import build_fib_from_leg
+from analysis.fibonacci import build_fib_from_leg, grid_from_prices
 from analysis.pivots import Pivot, detect_pivots
 from config import ROOT
 
@@ -94,6 +94,34 @@ def grid_search(df: pd.DataFrame, drawing: dict[str, Any]) -> dict[str, Any]:
     return {"best": trials[0], "trials": trials}
 
 
+def math_match_drawing(drawing: dict[str, Any]) -> dict[str, Any]:
+    """Compare YAML swing prices to exact fib math (no pivot search)."""
+    direction = drawing.get("direction") or "up"
+    grid = grid_from_prices(float(drawing["swing_low"]), float(drawing["swing_high"]), direction)
+    ext_err: dict[str, float] = {}
+    for name, expected in (drawing.get("expected_extensions") or {}).items():
+        ratio = float(name)
+        got = grid.extensions.get(ratio)
+        if got is None:
+            continue
+        ext_err[name] = abs(got - float(expected)) / max(float(expected), 1e-9)
+    return {
+        "id": drawing.get("id"),
+        "symbol": drawing.get("symbol"),
+        "low": drawing["swing_low"],
+        "high": drawing["swing_high"],
+        "extensions": {str(k): v for k, v in grid.extensions.items()},
+        "ext_err_pct": {k: round(v * 100, 3) for k, v in ext_err.items()},
+        "pass_1_618": (ext_err.get("1.618", 0.0) < 0.01) if "1.618" in ext_err else None,
+    }
+
+
+def calibrate_yaml_math() -> dict[str, Any]:
+    refs = load_references()
+    rows = [math_match_drawing(d) for d in refs.get("drawings", [])]
+    return {"style": refs.get("style"), "math": rows}
+
+
 def calibrate_all(ohlcv_by_symbol: dict[str, pd.DataFrame]) -> dict[str, Any]:
     refs = load_references()
     reports = []
@@ -103,4 +131,4 @@ def calibrate_all(ohlcv_by_symbol: dict[str, pd.DataFrame]) -> dict[str, Any]:
             reports.append({"id": drawing.get("id"), "error": "no_ohlcv"})
             continue
         reports.append(grid_search(df, drawing))
-    return {"style": refs.get("style"), "reports": reports}
+    return {"style": refs.get("style"), "reports": reports, "math": calibrate_yaml_math()["math"]}

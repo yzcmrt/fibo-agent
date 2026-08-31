@@ -1,5 +1,7 @@
 from analysis.pivots import Pivot, detect_pivots
-from analysis.fibonacci import FibGrid, build_fib_from_leg, grids_from_pivots
+from analysis.fibonacci import FibGrid, build_fib_from_leg, grid_from_prices, grids_from_pivots
+from analysis.channels import FibChannel, build_channel, channel_from_grid
+from analysis.nested import nested_grids
 from analysis.trendlines import detect_trendlines
 from analysis.support_resistance import cluster_sr
 from analysis.volume_profile import volume_profile
@@ -23,4 +25,9 @@ __all__ = [
     "load_references",
     "combine_htf_bias",
     "timeframe_bias",
+    "FibChannel",
+    "build_channel",
+    "channel_from_grid",
+    "nested_grids",
+    "grid_from_prices",
 ]

@@ -3,9 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from analysis.features import build_feature_row
 from analysis.fibonacci import grids_from_pivots
-from analysis.indicators import add_indicators, snapshot_features
-from analysis.macro_regime import classify_regime
+from analysis.indicators import add_indicators
+from analysis.nested import nested_grids, split_by_origin
+from analysis.macro_regime import classify_regime, compute_macro_bias
 from analysis.pivots import detect_pivots
 from analysis.support_resistance import cluster_sr
 from analysis.trend_confirmation import combine_htf_bias
@@ -67,7 +69,11 @@ class AgentOrchestra:
         params = params or default_genome(self.settings)
         work = add_indicators(df)
         pivots = detect_pivots(work, method=params["method"], threshold=float(params["threshold"]))
-        grids = grids_from_pivots(pivots, last_n_legs=6)
+        nested = nested_grids(work, self.settings, last_n_legs=4)
+        grouped = split_by_origin(nested)
+        grids = grouped["wick"][-2:] + grouped["close"][-2:]
+        if not grids:
+            grids = grids_from_pivots(pivots, last_n_legs=6)
         if symbol and "BTC" in symbol.upper():
             for grid in grids:
                 grid.extensions = {}
@@ -75,12 +81,29 @@ class AgentOrchestra:
         lines = detect_trendlines(pivots)
         profile = volume_profile(work, lookback=self.settings["volume"]["lookback"])
         regime = regime or classify_regime(None, None)
+        snap = {}
+        try:
+            from data.macro import last_known
+
+            snap = last_known(self.store)
+        except Exception:  # noqa: BLE001
+            snap = {}
+        macro_bias = compute_macro_bias(snap)
+        regime["macro_bias"] = macro_bias
         htf_bias = combine_htf_bias(daily, weekly)
         last_i = len(work) - 1
         price = float(work["close"].iloc[-1])
         atr = float(work["atr14"].iloc[-1] or price * 0.01)
         scored = []
-        for grid in grids[-3:]:
+        for grid in grids:
+            feats = build_feature_row(
+                work,
+                last_i,
+                grid=grid,
+                origin_mode=getattr(grid, "origin_mode", "wick"),
+                htf_bias=htf_bias,
+                macro_bias=macro_bias,
+            )
             raw = score_setup(
                 price=price,
                 grid=grid,
@@ -93,9 +116,8 @@ class AgentOrchestra:
                 weights=self.settings["confluence"]["weights"],
                 bar_index=last_i,
                 htf_bias=htf_bias,
+                features=feats,
             )
-            feats = snapshot_features(work, last_i)
-            feats["atr_pct"] = atr / max(price, 1e-9)
             feats["fib_ratio"] = raw["nearest_ratio"]
             feats["confluence"] = raw["score"]
             raw["model_prob"] = self.correlator.predict_proba(feats)

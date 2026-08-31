@@ -16,6 +16,8 @@ class FibGrid:
     direction: str  # "up" or "down"
     levels: dict[float, float] = field(default_factory=dict)
     extensions: dict[float, float] = field(default_factory=dict)
+    origin_mode: str = "wick"
+    scale: str = "short"
 
     @property
     def range(self) -> float:
@@ -42,6 +44,27 @@ def build_fib_from_leg(
     levels = {r: end.price - span * r for r in retracements}
     ext = {e: end.price + span * (e - 1.0) for e in extensions}
     return FibGrid(start=start, end=end, direction=direction, levels=levels, extensions=ext)
+
+
+def grid_from_prices(
+    low: float,
+    high: float,
+    direction: str = "up",
+    origin_mode: str = "wick",
+) -> FibGrid:
+    from datetime import datetime, timezone
+
+    ts = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    if direction == "up":
+        start = Pivot(0, ts, float(low), "low", "ref", 0.0)
+        end = Pivot(10, ts, float(high), "high", "ref", 0.0)
+    else:
+        start = Pivot(0, ts, float(high), "high", "ref", 0.0)
+        end = Pivot(10, ts, float(low), "low", "ref", 0.0)
+    grid = build_fib_from_leg(start, end)
+    grid.origin_mode = origin_mode
+    grid.scale = "ref"
+    return grid
 
 
 def grids_from_pivots(pivots: list[Pivot], last_n_legs: int = 8) -> list[FibGrid]:

@@ -6,14 +6,19 @@ import sys
 import time
 from pathlib import Path
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from analysis.fibonacci import grids_from_pivots
-from analysis.origins import rebase_pivot
-from analysis.pivots import detect_pivots
+from analysis.nested import nested_grids, split_by_origin
 from agents.orchestra import AgentOrchestra
 from config import load_settings
+from data.cvd import CvdCollector, attach_cvd_features
+from data.funding_oi import latest_features, persist_snapshot
+from alerts.dedup import SignalDeduper, notify_setup
+from alerts.telegram import send_signal
+from learning.forward import enqueue_forward
 from learning.hold_miner import mine_hold_correlations
 from learning.memory import LearningMemory
 
@@ -25,10 +30,14 @@ TFS = ["1d", "4h"]
 
 
 def persist_drawings(orch: AgentOrchestra, symbol: str, timeframe: str, df) -> int:
-    pivots = detect_pivots(df, method="pct", threshold=0.05 if timeframe == "4h" else 0.08)
-    grids = grids_from_pivots([rebase_pivot(df, p, "wick") for p in pivots], last_n_legs=4)
+    grids = nested_grids(df, orch.settings, last_n_legs=4)
+    if "BTC" in symbol.upper():
+        for grid in grids:
+            grid.extensions = {}
+    grouped = split_by_origin(grids)
+    chosen = grouped["wick"][-2:] + grouped["close"][-2:]
     n = 0
-    for grid in grids[-2:]:
+    for grid in chosen:
         orch.store.execute(
             """
             INSERT INTO live_drawings (
@@ -44,7 +53,7 @@ def persist_drawings(orch: AgentOrchestra, symbol: str, timeframe: str, df) -> i
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "direction": grid.direction,
-                "origin_mode": "wick",
+                "origin_mode": grid.origin_mode,
                 "swing_low": min(grid.start.price, grid.end.price),
                 "swing_high": max(grid.start.price, grid.end.price),
                 "levels_json": json.dumps({str(k): v for k, v in grid.levels.items()}),
@@ -71,6 +80,8 @@ def cycle_once(min_candles: int = 2200) -> None:
     settings = load_settings()
     orch = AgentOrchestra(settings)
     exchange = "okx" if "okx" in orch.hub.available() else orch.hub.available()[0]
+    collector = CvdCollector(orch.hub, orch.store)
+    deduper = SignalDeduper(store=orch.store)
     drawn = 0
     notes = []
     for symbol in SYMBOLS:
@@ -90,10 +101,38 @@ def cycle_once(min_candles: int = 2200) -> None:
             except Exception as exc:  # noqa: BLE001
                 notes.append(f"{symbol} {tf} {exc}")
                 frames[tf] = None
+        try:
+            n_cvd = collector.ingest_bar(exchange, symbol, "4h", market="swap")
+            notes.append(f"{symbol} cvd_swap={n_cvd}")
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"{symbol} cvd {exc}")
+        spot = symbol.replace(":USDT", "")
+        try:
+            n_spot = collector.ingest_bar(exchange, spot, "4h", market="spot")
+            notes.append(f"{spot} cvd_spot={n_spot}")
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"{spot} cvd_spot {exc}")
         for tf in TFS:
             df = frames.get(tf)
             if df is None or getattr(df, "empty", True):
                 continue
+            if tf == "4h":
+                try:
+                    cvd_df = orch.store.load_cvd(exchange, symbol, "swap", "4h")
+                    if "ts" not in df.columns and df.index is not None:
+                        df = df.copy()
+                        df["ts"] = [int(pd_ts.timestamp() * 1000) if hasattr(pd_ts, "timestamp") else int(pd_ts) for pd_ts in df.index]
+                    df = attach_cvd_features(df, cvd_df)
+                    persist_snapshot(orch.hub, orch.store, exchange, symbol)
+                    pret = 0.0
+                    if len(df) >= 2:
+                        prev_px = float(df["close"].iloc[-2])
+                        pret = float(df["close"].iloc[-1]) / prev_px - 1.0 if prev_px else 0.0
+                    extra = latest_features(orch.store, exchange, symbol, pret)
+                    for key, value in extra.items():
+                        df[key] = value
+                except Exception as exc:  # noqa: BLE001
+                    notes.append(f"{symbol} cvd_join {exc}")
             drawn += persist_drawings(orch, symbol, tf, df)
             if tf == "4h":
                 analysis = orch.analyze(
@@ -103,12 +142,44 @@ def cycle_once(min_candles: int = 2200) -> None:
                     symbol=symbol,
                 )
                 notes.append(f"{symbol} htf={analysis.get('htf_bias'):.2f}")
-            if tf == "4h" and symbol == "ETH/USDT:USDT":
-                mined = mine_hold_correlations(df, origin_mode="wick")
-                LearningMemory(orch.store).log_phase("mine", json.dumps(mined["rules"]))
-                notes.append(f"ETH miner hold={mined['n_hold']} fail={mined['n_fail']}")
+                for item in analysis.get("scored") or []:
+                    raw = item.get("score") or {}
+                    if float(raw.get("score") or 0) >= float(orch.settings["confluence"].get("signal_threshold", 70)):
+                        enqueue_forward(
+                            orch.store,
+                            symbol,
+                            tf,
+                            raw.get("direction") or "up",
+                            float(raw.get("nearest_price") or 0),
+                            grid=item.get("grid"),
+                            key_ratio=float(raw.get("nearest_ratio") or 0.618),
+                        )
+                        if orch.settings.get("alerts", {}).get("enabled"):
+                            notify_setup(
+                                text=(
+                                    f"{symbol} {tf} score={raw.get('score'):.1f} "
+                                    f"{raw.get('direction')} {raw.get('nearest_ratio')} @ {raw.get('nearest_price')}"
+                                ),
+                                symbol=symbol,
+                                timeframe=tf,
+                                direction=str(raw.get("direction") or "up"),
+                                key_price=float(raw.get("nearest_price") or 0),
+                                score=float(raw.get("score") or 0),
+                                deduper=deduper,
+                                sender=send_signal,
+                            )
+            if tf == "4h":
+                mined = mine_hold_correlations(
+                    df,
+                    origin_mode="wick",
+                    daily=frames.get("1d"),
+                    weights=orch.settings["confluence"]["weights"],
+                    symbol=symbol,
+                )
+                LearningMemory(orch.store).log_phase("mine", json.dumps({"symbol": symbol, "rules": mined["rules"]}))
+                notes.append(f"{symbol} miner hold={mined['n_hold']} fail={mined['n_fail']}")
                 if mined["rules"]:
-                    write_report(orch, "learn", "ETH hold korelasyonları", "\n".join(mined["rules"]))
+                    write_report(orch, "learn", f"{symbol} hold korelasyonları", "\n".join(mined["rules"]))
     write_report(orch, "cycle", "Worker turu", f"{drawn} yeni çizim. " + "; ".join(notes))
     logging.info("cycle done drawings=%s", drawn)
 

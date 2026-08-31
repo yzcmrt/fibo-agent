@@ -29,12 +29,48 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["vol_z"] = (vol - vol.rolling(50, min_periods=20).mean()) / vol.rolling(50, min_periods=20).std()
     out["ret_1"] = close.pct_change()
     out["ret_12"] = close.pct_change(12)
+    mid = close.rolling(20, min_periods=20).mean()
+    std = close.rolling(20, min_periods=20).std()
+    out["bb_mid"] = mid
+    out["bb_upper"] = mid + 2.0 * std
+    out["bb_lower"] = mid - 2.0 * std
+    band = (out["bb_upper"] - out["bb_lower"]).replace(0.0, pd.NA)
+    out["bb_width"] = band / mid.replace(0.0, pd.NA)
+    out["bb_pct"] = (close - out["bb_lower"]) / band
+    body = (out["close"] - out["open"]).abs() if "open" in out.columns else (high - low) * 0.5
+    rng = (high - low).replace(0.0, pd.NA)
+    out["body_ratio"] = body / rng
+    out["conviction"] = ((out["vol_z"] > 2.0) & (out["body_ratio"] > 0.6)).astype(float)
+    for col in ("cvd_slope", "cvd_div", "cvd_cum"):
+        if col not in out.columns:
+            out[col] = 0.0
     return out
 
 
 def snapshot_features(df: pd.DataFrame, idx: int) -> dict[str, float]:
     row = df.iloc[idx]
-    keys = ["rsi14", "atr14", "ema_trend", "vol_z", "ret_1", "ret_12"]
+    keys = [
+        "rsi14",
+        "atr14",
+        "ema_trend",
+        "vol_z",
+        "ret_1",
+        "ret_12",
+        "bb_mid",
+        "bb_upper",
+        "bb_lower",
+        "bb_width",
+        "bb_pct",
+        "body_ratio",
+        "conviction",
+        "cvd_slope",
+        "cvd_div",
+        "cvd_cum",
+        "cvd_available",
+        "oi_rule",
+        "funding_roc",
+        "oi_available",
+    ]
     feats: dict[str, float] = {}
     for k in keys:
         val = row.get(k)

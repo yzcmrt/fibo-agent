@@ -23,3 +23,23 @@ def classify_regime(usdt_d: float | None, btc_d: float | None, usdt_slope: float
     else:
         btc_regime = "balanced"
     return {"label": label, "alt_bias": alt_bias, "btc_regime": btc_regime, "usdt_d": usdt, "btc_d": btc}
+
+
+def compute_macro_bias(row: dict[str, Any] | None) -> float:
+    """Premium + ETF sign + event-day dampener. Missing inputs are skipped, not zero-filled as facts."""
+    if not row:
+        return 0.0
+    parts: list[float] = []
+    prem = row.get("coinbase_premium_pct")
+    flow = row.get("etf_net_flow_usd")
+    if prem is not None and prem == prem:
+        parts.append(max(-1.0, min(1.0, float(prem) / 0.25)))
+    if flow is not None and flow == flow:
+        parts.append(1.0 if float(flow) > 0 else -1.0 if float(flow) < 0 else 0.0)
+    if not parts:
+        return 0.0
+    bias = sum(parts) / len(parts)
+    flags = str(row.get("source_flags") or "")
+    if "calendar:" in flags and "quiet" not in flags:
+        bias *= 0.7
+    return max(-1.0, min(1.0, bias))

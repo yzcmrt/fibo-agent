@@ -42,11 +42,12 @@ Nginx örneği: `deploy/nginx/fibo.conf`. Basic auth: `htpasswd -c /etc/nginx/.f
 
 ## Faz durumu (PROMPT-FINAL.md)
 
-- 0 altyapı + bugfix — bu commit
-- 1 correlator kalıcılığı — bu commit
-- 2 HTF teyidi — sıradaki
-- 2b wick/close + fib kanalı + YAML kalibrasyon
-- 3–11 PROMPT-FINAL.md
+- 0–6 kod olarak kapalı
+- 7 masraflı backtest (brüt/net)
+- 8 forward kuyruk + fold 6 (4–8 haftalık birikim zaman ister)
+- 9 paper/demo executor + risk + kill switch (`enabled: false`)
+- 10 dashboard forward kartı + kill
+- 11 sinyal (Telegram/Discord, alerts.enabled=false); canlı kilitli
 
 ## Dürüst sınır
 

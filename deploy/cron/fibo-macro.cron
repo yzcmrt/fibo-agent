@@ -1,0 +1,2 @@
+# Günde bir, 08:00 sistem saati. Yolu kendi repo kökünle değiştir.
+0 8 * * * /home/USER/crypto-fibo-agent/.venv/bin/python /home/USER/crypto-fibo-agent/scripts/fetch_macro.py >> /home/USER/crypto-fibo-agent/macro-cron.log 2>&1

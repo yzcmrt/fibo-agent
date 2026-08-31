@@ -41,10 +41,18 @@
   <header>
     <h1>Crypto Fibo Agent</h1>
     <span id="status">yükleniyor…</span>
+    <button class="fail" onclick="kill(false)">Kill switch</button>
   </header>
   <main>
     <section>
-      <h2>Canlı / üretilen fibler</h2>
+      <h2>Mum + fib</h2>
+      <div id="chart" style="height:280px"></div>
+      <div class="meta" id="chartmeta">OHLCV yoksa boş kalır</div>
+      <h2 style="margin-top:16px">CVD spark</h2>
+      <div id="spark" class="lvls">—</div>
+      <h2 style="margin-top:16px">Paper fill</h2>
+      <div id="venues"></div>
+      <h2 style="margin-top:16px">Canlı / üretilen fibler</h2>
       <div class="stats" id="stats"></div>
       <div id="drawings">Henüz çizim yok. Worker’ı çalıştırınca dolacak.</div>
     </section>
@@ -55,8 +63,17 @@
       <div id="corr"></div>
     </section>
   </main>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
+    async function kill(enabled) {
+      await fetch('/api/kill', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled})
+      });
+      load();
+    }
     async function review(id, label) {
       await fetch('/api/review', {
         method: 'POST',
@@ -79,6 +96,8 @@
           <div class="stat"><b>${(data.drawings||[]).length}</b><span class="meta">çizim</span></div>
           <div class="stat"><b>${reviews.hold || 0}</b><span class="meta">tuttu</span></div>
           <div class="stat"><b>${reviews.fail || 0}</b><span class="meta">tutmadı</span></div>
+          <div class="stat"><b>${(data.forward && data.forward.done) || 0}</b><span class="meta">forward biten</span></div>
+          <div class="stat"><b>${data.killed ? 'KİLİT' : 'açık'}</b><span class="meta">execution</span></div>
         `;
         $('drawings').innerHTML = (data.drawings || []).map(d => `
           <div class="card">
@@ -95,6 +114,34 @@
         $('reports').innerHTML = (data.reports || []).map(r => `
           <div class="card"><b>${r.title || r.kind}</b><div class="meta">${r.kind}</div><div>${(r.body || '').replaceAll('\\n','<br>')}</div></div>
         `).join('') || '<div class="meta">Rapor yok</div>';
+        const venues = data.fills_by_venue || {};
+        $('venues').innerHTML = ['okx','bybit'].map(v => `
+          <div class="card"><b>${v}</b>
+            ${(venues[v]||[]).map(f => `<div class="meta">${f.symbol} ${f.side} ${f.qty} @ ${f.price} ${f.note||''}</div>`).join('') || '<div class="meta">fill yok</div>'}
+          </div>`).join('');
+        const first = (data.drawings || [])[0];
+        if (first) {
+          fetch('/api/ohlcv?symbol=' + encodeURIComponent(first.symbol) + '&tf=' + encodeURIComponent(first.timeframe))
+            .then(r => r.json()).then(ohlc => {
+              $('chartmeta').textContent = first.symbol + ' ' + first.timeframe;
+              if (window.LightweightCharts && ohlc.candles && ohlc.candles.length) {
+                const el = $('chart');
+                el.innerHTML = '';
+                const chart = LightweightCharts.createChart(el, { layout: { background: { color: '#0e141c' }, textColor: '#9bb0c4' }, width: el.clientWidth, height: 280 });
+                const series = chart.addCandlestickSeries();
+                series.setData(ohlc.candles);
+                try {
+                  const lvls = JSON.parse(first.levels_json || '{}');
+                  Object.values(lvls).forEach(p => series.createPriceLine({ price: Number(p), color: '#5b8def', lineWidth: 1 }));
+                } catch (e) {}
+              }
+            });
+          fetch('/api/cvd?symbol=' + encodeURIComponent(first.symbol))
+            .then(r => r.json()).then(c => {
+              const s = c.spark || [];
+              $('spark').textContent = s.length ? s.map(x => x.toFixed(1)).join(' ') : 'CVD birikmiyor';
+            });
+        }
         $('corr').innerHTML = (data.correlations || []).map(c => `
           <div class="card"><b>${c.feature}</b><div class="meta">hold ${c.success_mean} / fail ${c.fail_mean} / w ${Number(c.weight).toFixed(3)}</div></div>
         `).join('') || '<div class="meta">Henüz korelasyon yok</div>';

@@ -5,11 +5,23 @@ from typing import Any
 
 import pandas as pd
 
+from analysis.features import build_feature_row
 from analysis.fibonacci import grids_from_pivots
-from analysis.indicators import add_indicators, snapshot_features
+from analysis.indicators import add_indicators
 from analysis.origins import rebase_pivot
 from analysis.pivots import detect_pivots
 from learning.outcome import label_fib_hold
+from learning.weight_tuner import feature_delta_table, propose_weights
+
+
+RETRACEMENT_RATIOS = (0.382, 0.5, 0.618, 0.786)
+EXTENSION_RATIOS = (1.618,)
+
+
+def key_ratios_for_symbol(symbol: str | None) -> tuple[float, ...]:
+    if symbol and str(symbol).upper().startswith("BTC"):
+        return RETRACEMENT_RATIOS
+    return RETRACEMENT_RATIOS + EXTENSION_RATIOS
 
 
 HOLD_FEATURES = [
@@ -21,30 +33,33 @@ HOLD_FEATURES = [
     "ema20_slope",
     "close_vs_ema50",
     "fib_ratio",
+    "bb_pct",
+    "bb_width",
+    "conviction",
+    "cvd_slope",
+    "cvd_div",
+    "htf_alignment",
+    "channel_position",
+    "macro_bias",
+    "origin_is_wick",
+    "oi_rule",
+    "funding_roc",
 ]
-
-
-def _extra_features(df: pd.DataFrame, idx: int) -> dict[str, float]:
-    row = df.iloc[idx]
-    close = float(row["close"])
-    ema50 = float(row["ema55"]) if row.get("ema55") == row.get("ema55") else close
-    ema21 = float(row["ema21"]) if row.get("ema21") == row.get("ema21") else close
-    prev_ema = float(df["ema21"].iloc[max(0, idx - 3)]) if idx >= 3 else ema21
-    return {
-        "ema20_slope": (ema21 - prev_ema) / max(abs(prev_ema), 1e-9),
-        "close_vs_ema50": (close - ema50) / max(abs(ema50), 1e-9),
-        "atr_pct": float(row.get("atr14") or 0.0) / max(close, 1e-9),
-    }
 
 
 def mine_hold_correlations(
     df: pd.DataFrame,
     params: dict[str, Any] | None = None,
     origin_mode: str = "wick",
-    key_ratios: tuple[float, ...] = (0.382, 0.5, 0.618, 0.786, 1.618),
+    key_ratios: tuple[float, ...] | None = None,
+    symbol: str | None = None,
+    daily: pd.DataFrame | None = None,
+    weights: dict[str, float] | None = None,
+    macro_bias: float = 0.0,
 ) -> dict[str, Any]:
     """When a fib level is tagged, snapshot indicators and split hold vs fail."""
     params = params or {"method": "pct", "threshold": 0.05, "horizon_bars": 24, "touch_tolerance_atr": 0.3, "min_continuation_r": 1.0}
+    key_ratios = key_ratios if key_ratios is not None else key_ratios_for_symbol(symbol)
     work = add_indicators(df)
     raw_pivots = detect_pivots(work, method=params["method"], threshold=float(params["threshold"]))
     pivots = [rebase_pivot(work, p, "close" if origin_mode == "close" else "wick") for p in raw_pivots]
@@ -109,9 +124,15 @@ def mine_hold_correlations(
                 continue
             key = f"{ratio:.3f}"
             by_ratio[key]["touch"] += 1
-            feats = snapshot_features(work, idx)
-            feats.update(_extra_features(work, idx))
-            feats["fib_ratio"] = float(ratio)
+            feats = build_feature_row(
+                work,
+                idx,
+                grid=grid,
+                origin_mode=origin_mode,
+                daily=daily,
+                macro_bias=macro_bias,
+                fib_ratio=float(ratio),
+            )
             if out_success:
                 by_ratio[key]["hold"] += 1
                 holds.append(feats)
@@ -119,29 +140,18 @@ def mine_hold_correlations(
                 by_ratio[key]["fail"] += 1
                 fails.append(feats)
 
-    comparison: dict[str, dict[str, float]] = {}
-    for name in HOLD_FEATURES:
-        hvals = [r.get(name, 0.0) or 0.0 for r in holds]
-        fvals = [r.get(name, 0.0) or 0.0 for r in fails]
-        if not hvals or not fvals:
-            continue
-        hmean = sum(hvals) / len(hvals)
-        fmean = sum(fvals) / len(fvals)
-        comparison[name] = {
-            "hold_mean": round(hmean, 5),
-            "fail_mean": round(fmean, 5),
-            "delta": round(hmean - fmean, 5),
-        }
+    comparison = feature_delta_table(holds, fails, HOLD_FEATURES)
 
     rules = []
-    for name, stats in sorted(comparison.items(), key=lambda kv: abs(kv[1]["delta"]), reverse=True):
-        if abs(stats["delta"]) < 1e-6:
+    for name, stats in sorted(comparison.items(), key=lambda kv: abs(kv[1]["std_delta"]), reverse=True):
+        if abs(stats["std_delta"]) < 1e-6:
             continue
         side = "daha yüksek" if stats["delta"] > 0 else "daha düşük"
         rules.append(
             f"Fib hold olduğunda {name} fail'e göre {side} "
-            f"(hold {stats['hold_mean']}, fail {stats['fail_mean']})."
+            f"(hold {stats['hold_mean']}, fail {stats['fail_mean']}, d={stats['std_delta']})."
         )
+    proposal = propose_weights(weights, comparison) if weights else None
 
     return {
         "origin_mode": origin_mode,
@@ -150,4 +160,6 @@ def mine_hold_correlations(
         "by_ratio": dict(by_ratio),
         "feature_delta": comparison,
         "rules": rules[:8],
+        "proposed_weights": None if proposal is None else proposal["weights"],
+        "weight_notes": None if proposal is None else proposal["notes"],
     }

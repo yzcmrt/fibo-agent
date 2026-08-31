@@ -124,6 +124,68 @@ CREATE TABLE IF NOT EXISTS reports (
     body TEXT,
     created_ts INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS cvd (
+    exchange TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    market TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    buy_vol REAL NOT NULL,
+    sell_vol REAL NOT NULL,
+    delta REAL NOT NULL,
+    cumulative_delta REAL NOT NULL,
+    PRIMARY KEY (exchange, symbol, market, timeframe, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_cvd_ts ON cvd (symbol, market, timeframe, ts);
+
+CREATE TABLE IF NOT EXISTS macro_snapshot (
+    ts INTEGER PRIMARY KEY,
+    etf_net_flow_usd REAL,
+    coinbase_premium_pct REAL,
+    fed_hold_prob REAL,
+    fed_cut_prob REAL,
+    jgb_10y REAL,
+    usdjpy REAL,
+    usdt_d REAL,
+    btc_d REAL,
+    source_flags TEXT
+);
+
+CREATE TABLE IF NOT EXISTS forward_setups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT,
+    timeframe TEXT,
+    direction TEXT,
+    key_price REAL,
+    key_ratio REAL,
+    grid_json TEXT,
+    created_ts INTEGER,
+    resolve_ts INTEGER,
+    status TEXT,
+    success INTEGER,
+    r_multiple REAL,
+    note TEXT,
+    touched INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS paper_fills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    venue TEXT,
+    symbol TEXT,
+    side TEXT,
+    qty REAL,
+    price REAL,
+    status TEXT,
+    note TEXT,
+    created_ts INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS runtime_flags (
+    name TEXT PRIMARY KEY,
+    value TEXT,
+    updated_ts INTEGER
+);
 """
 
 
@@ -150,6 +212,15 @@ class Store:
         raw = self.engine.raw_connection()
         try:
             raw.executescript(SCHEMA_SQL)
+            cols = {row[1] for row in raw.execute("PRAGMA table_info(forward_setups)").fetchall()}
+            for col, decl in (
+                ("key_ratio", "REAL"),
+                ("grid_json", "TEXT"),
+                ("note", "TEXT"),
+                ("touched", "INTEGER"),
+            ):
+                if col not in cols:
+                    raw.execute(f"ALTER TABLE forward_setups ADD COLUMN {col} {decl}")
             raw.commit()
         finally:
             raw.close()
@@ -213,6 +284,56 @@ class Store:
         )
         with self.engine.begin() as conn:
             return int(conn.execute(sql, {"exchange": exchange, "symbol": symbol, "timeframe": timeframe}).scalar() or 0)
+
+    def upsert_cvd(self, rows: list[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        sql = text(
+            """
+            INSERT INTO cvd (exchange, symbol, market, timeframe, ts, buy_vol, sell_vol, delta, cumulative_delta)
+            VALUES (:exchange, :symbol, :market, :timeframe, :ts, :buy_vol, :sell_vol, :delta, :cumulative_delta)
+            ON CONFLICT(exchange, symbol, market, timeframe, ts) DO UPDATE SET
+                buy_vol=excluded.buy_vol, sell_vol=excluded.sell_vol,
+                delta=excluded.delta, cumulative_delta=excluded.cumulative_delta
+            """
+        )
+        with self.engine.begin() as conn:
+            conn.execute(sql, rows)
+        return len(rows)
+
+    def load_cvd(self, exchange: str, symbol: str, market: str, timeframe: str) -> pd.DataFrame:
+        return self.query(
+            """
+            SELECT ts, buy_vol, sell_vol, delta, cumulative_delta
+            FROM cvd
+            WHERE exchange=:e AND symbol=:s AND market=:m AND timeframe=:tf
+            ORDER BY ts
+            """,
+            {"e": exchange, "s": symbol, "m": market, "tf": timeframe},
+        )
+
+    def upsert_funding_oi(self, row: dict[str, Any]) -> None:
+        self.execute(
+            """
+            INSERT INTO funding_oi (exchange, symbol, ts, funding_rate, open_interest)
+            VALUES (:exchange, :symbol, :ts, :funding_rate, :open_interest)
+            ON CONFLICT(exchange, symbol, ts) DO UPDATE SET
+                funding_rate=excluded.funding_rate,
+                open_interest=excluded.open_interest
+            """,
+            row,
+        )
+
+    def load_funding_oi(self, exchange: str, symbol: str) -> pd.DataFrame:
+        return self.query(
+            """
+            SELECT ts, funding_rate, open_interest
+            FROM funding_oi
+            WHERE exchange=:e AND symbol=:s
+            ORDER BY ts
+            """,
+            {"e": exchange, "s": symbol},
+        )
 
     def execute(self, sql: str, params: dict[str, Any] | list[dict[str, Any]] | None = None) -> None:
         with self.engine.begin() as conn:

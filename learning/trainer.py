@@ -9,8 +9,9 @@ from typing import Any
 
 import pandas as pd
 
+from analysis.features import build_feature_row
 from analysis.fibonacci import grids_from_pivots
-from analysis.indicators import add_indicators, snapshot_features
+from analysis.indicators import add_indicators
 from analysis.pivots import detect_pivots
 from learning.correlator import FeatureCorrelator
 from learning.memory import LearningMemory
@@ -84,15 +85,21 @@ def evaluate_genome(df: pd.DataFrame, params: dict[str, Any]) -> tuple[dict[str,
         if not out.touched:
             continue
         touched += 1
-        feats = snapshot_features(work, min(out.entry_price and grid.end.index or grid.end.index, len(work) - 1))
-        feats["atr_pct"] = feats.get("atr14", 0.0) / max(feats.get("close", 1.0), 1e-9)
-        feats["fib_ratio"] = float(params["key_ratio"])
+        feats = build_feature_row(
+            work,
+            min(grid.end.index, len(work) - 1),
+            grid=grid,
+            fib_ratio=float(params["key_ratio"]),
+        )
         feats["confluence"] = 0.0
         rows.append(feats)
         labels.append(1 if out.success else 0)
         if out.success:
             successes += 1
         r_sum += out.r_multiple
+        feats["_r"] = float(out.r_multiple)
+        feats["_mfe"] = float(out.mfe)
+        feats["_mae"] = float(out.mae)
 
     n = touched
     precision = successes / n if n else 0.0
@@ -199,6 +206,13 @@ class EvolutionaryTrainer:
                 parent = rng.choice(elites)
                 population.append(mutate(parent, rng))
 
+        from learning.human_labels import apply_human_overrides, reviews_from_store
+
+        human_hits = 0
+        store = getattr(self.memory, "store", None)
+        if store is not None:
+            reviews = reviews_from_store(store)
+            all_rows, all_labels, human_hits = apply_human_overrides(all_rows, all_labels, reviews)
         weights = self.correlator.fit(all_rows, all_labels)
         if weights:
             self.memory.save_correlations(weights, self.correlator.means)
@@ -212,4 +226,11 @@ class EvolutionaryTrainer:
                 "%80 precision walk-forward + yeterli örneklem olmadan iddia edilmemelidir."
             ),
         }
-        return {"best": best, "history": history, "weights": weights, "gate": gate, "n_labeled": len(all_labels)}
+        return {
+            "best": best,
+            "history": history,
+            "weights": weights,
+            "gate": gate,
+            "n_labeled": len(all_labels),
+            "human_overrides": human_hits,
+        }

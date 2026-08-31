@@ -29,14 +29,17 @@ def main() -> None:
             continue
         frames[symbol] = orch.ingest_symbol(exchange, symbol, "4h", 2000)
         print(symbol, "bars", len(frames[symbol]))
-    report = calibrate_all(frames)
+    from analysis.calibrate import calibrate_yaml_math
+
+    math_report = calibrate_yaml_math()
+    report = calibrate_all(frames) if frames else {"reports": [], "style": math_report["style"]}
     slim = []
-    for item in report["reports"]:
+    for item in report.get("reports", []):
         if "best" in item:
             slim.append(item["best"])
         else:
             slim.append(item)
-    print(json.dumps({"style": report["style"], "best_matches": slim}, indent=2))
+    print(json.dumps({"style": math_report["style"], "math": math_report["math"], "best_matches": slim}, indent=2))
 
 
 if __name__ == "__main__":

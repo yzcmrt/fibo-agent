@@ -75,13 +75,15 @@ volume:
 
 confluence:
   weights:
-    fib_proximity: 0.24
-    sr_overlap: 0.15
-    trendline: 0.13
-    volume_oi: 0.12
-    regime: 0.11
-    indicator_model: 0.10
-    htf_alignment: 0.15
+    fib_proximity: 0.20
+    sr_overlap: 0.13
+    trendline: 0.11
+    volume_oi: 0.10
+    regime: 0.09
+    indicator_model: 0.08
+    htf_alignment: 0.13
+    bb_position: 0.08
+    cvd_bias: 0.08
   signal_threshold: 70
 
 learning:
@@ -92,13 +94,26 @@ learning:
   population: 12
   generations: 6
   elite_frac: 0.34
-  walk_forward_folds: 4
+  walk_forward_folds: 6
   random_seed: 42
 
 alerts:
   enabled: false
   render_charts: true
 
+intraday:
+  enabled: false
+
 execution:
   enabled: false
   paper_only: true
+  demo: true
+  venue: okx
+  max_positions: 3
+  max_symbol_notional: 250.0
+  risk_pct: 0.005
+  max_daily_r: -3.0
+  taker_fee: 0.0005
+  maker_fee: 0.0002
+  slippage_bps: 2.0
+  avg_funding: 0.0001

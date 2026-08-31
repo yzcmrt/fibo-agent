@@ -1,3 +1,2 @@
-from backtest.engine import run_backtest
+"""Import backtest.engine / backtest.split directly."""
 
-__all__ = ["run_backtest"]
