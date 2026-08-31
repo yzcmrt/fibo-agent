@@ -16,6 +16,7 @@ FEATURE_TO_WEIGHT = {
     "origin_is_wick": "fib_proximity",
     "oi_rule": "volume_oi",
     "funding_roc": "volume_oi",
+    "dist_to_extreme_now": "fib_proximity",
 }
 
 CORE_FLOOR = {

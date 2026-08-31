@@ -70,6 +70,7 @@ def snapshot_features(df: pd.DataFrame, idx: int) -> dict[str, float]:
         "oi_rule",
         "funding_roc",
         "oi_available",
+        "dist_to_extreme_now",
     ]
     feats: dict[str, float] = {}
     for k in keys:

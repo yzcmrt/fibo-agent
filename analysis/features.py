@@ -59,6 +59,11 @@ def build_feature_row(
             feats["channel_position"] = 0.5
     if fib_ratio is not None:
         feats["fib_ratio"] = float(fib_ratio)
+    feats["dist_to_extreme_now"] = 0.0
+    if grid is not None:
+        from analysis.path_stats import dist_to_extreme_now
+
+        feats["dist_to_extreme_now"] = dist_to_extreme_now(float(work["close"].iloc[idx]), grid)
     return feats
 
 

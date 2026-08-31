@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from analysis.features import build_feature_row
+from analysis.path_stats import outcome_path_stats
 from analysis.fibonacci import grids_from_pivots
 from analysis.indicators import add_indicators
 from analysis.pivots import detect_pivots
@@ -92,6 +93,15 @@ def evaluate_genome(df: pd.DataFrame, params: dict[str, Any]) -> tuple[dict[str,
             fib_ratio=float(params["key_ratio"]),
         )
         feats["confluence"] = 0.0
+        feats.update(
+            outcome_path_stats(
+                work,
+                grid,
+                key_ratio=float(params["key_ratio"]),
+                horizon_bars=int(params["horizon_bars"]),
+                entry_price=out.entry_price,
+            )
+        )
         rows.append(feats)
         labels.append(1 if out.success else 0)
         if out.success:

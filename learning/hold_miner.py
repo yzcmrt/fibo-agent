@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from analysis.features import build_feature_row
+from analysis.path_stats import outcome_path_stats
 from analysis.fibonacci import grids_from_pivots
 from analysis.indicators import add_indicators
 from analysis.origins import rebase_pivot
@@ -44,6 +45,11 @@ HOLD_FEATURES = [
     "origin_is_wick",
     "oi_rule",
     "funding_roc",
+    "dist_to_extreme_now",
+    "pct_run",
+    "dist_to_extreme",
+    "bars_to_ext",
+    "tag_wick",
 ]
 
 
@@ -132,6 +138,15 @@ def mine_hold_correlations(
                 daily=daily,
                 macro_bias=macro_bias,
                 fib_ratio=float(ratio),
+            )
+            feats.update(
+                outcome_path_stats(
+                    work,
+                    grid,
+                    key_ratio=float(ratio) if float(ratio) in grid.levels else 0.618,
+                    horizon_bars=int(params.get("horizon_bars", 24)),
+                    entry_price=getattr(out, "entry_price", None),
+                )
             )
             if out_success:
                 by_ratio[key]["hold"] += 1
